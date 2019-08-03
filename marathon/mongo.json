@@ -1,0 +1,62 @@
+{
+  "id": "/mongo",
+  "cmd": null,
+  "cpus": 1,
+  "mem": 1024,
+  "disk": 0,
+  "instances": 3,
+  "constraints": [
+    [
+      "hostname",
+      "UNIQUE"
+    ]
+  ],
+  "env": {
+    "MONGO_SSL_KEY": "htr2V2u4+BQ302tGkBC3E6lWtCh4xd+abI+0JO9zgamEzyxpwN9qk0PfsxrSJBt+ tQCwGQIGQ9zpflUtepQgckKiotVCwfaZQ36E09cu6071q9JunWM7DStmLT0EUxCw hxPqfMdvJZkqrHSeWtF8kd+t4x2TsY4VWbt+y72wZvWU2pjKA7G8iG9sT35uPLpv LaFPjZaBDm/sVplSQ9YUTOHBzhtg4PyTdRrKZEZTWaNBSYEvFF4kWSLBRJ9O28TY KR710tmVUwFllqk3qnWaLGXQ5rk1Isp/jd8EC4SWmnmnP3KLtOeixSNciMjCufa7 e3vbSNSR58h3wT52cK63Dcbmy4Z2qD4Dps8UR1Ag4RXnOi05BU8Eab0FL9wfWuKT G4O4QqfscDy3NpTooloAmlmMUJnbJRFz/xz/qCBaOpgpa7axrpyVS72GHUbIU5ZV 6uR1i13znOURqhaCj+ylUHctnO9Oja7kKVgUduiWEcuszph2cdOUNq4Xu6zGJa68 PCvtSlwUKAjeQseAOnqsNzDIUvrK/5mvvHES4cDnaqjn9BQD0RjhFgwZIoZSgYbZ zAukd9cyM5Je+p+ICLzDmj8OvqMcGpguS8w/dMaDh7M4Hv0Z08EuCaH3RumTCCnL ankQQgW6Jz/IJDj/5yxUIr1VuECtorNms1QLDRD/mfJQ+WyWGrOlKxJTtrw9+RgH 7YHMP0sb2kPv8hibTbjFkTdTRlaikTTzY/FN9MHIqmH9ZZqf2UGSAparxGxTe7fO f6SPAbeaxBx0C4QZlxtmiUEM4jOvBdNVoF4wfYcgphnkCwyLDaY9JjoiJXlK9m7Y iCBVkCnNxZp3eAckLgXL+JNYL5G5+RTft9j9wUZkCnZD2oCaoprs5utpDcWjIr/Y 3kS+0eShtVbQ1IzStEoKbOBgBbP+zz6lNJg5dlJIcuJfpvseXlE2WmdOLG5/+ESx Gtaya4wf2l76+GRL1YzuHjAFZ0aT1Ldq5tFHMDZwNwSfhSqf",
+    "MONGO_REPLICA_SET": "rs",
+    "MONGO_DB_PATH": "/data/db",
+    "MONGO_LOG_PATH": "/var/log/mongodb/mongod.log",
+    "MONGO_USER_ADMIN_USERNAME": "user_admin",
+    "MONGO_USER_ADMIN_PASSWORD": "user_admin",
+    "MONGO_CLUSTER_ADMIN_USERNAME": "cluster_admin",
+    "MONGO_CLUSTER_ADMIN_PASSWORD": "cluster_admin",
+    "MESOS_URL": "http://leader.mesos:8080",
+    "LOG_LEVEL": "DEBUG"
+  },
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "forcePullImage": true,
+      "image": "cdpqleo/mongodb:4.0.10"
+    },
+    "volumes": [],
+    "portMappings": [
+      {
+        "containerPort": 27017,
+        "hostPort": 0,
+        "labels": {
+          "VIP_0": "/mongo:27017"
+        },
+        "protocol": "tcp"
+      }
+    ]
+  },
+  "networks": [
+    {
+      "mode": "container/bridge"
+    }
+  ],
+  "healthChecks": [
+    {
+      "gracePeriodSeconds": 300,
+      "intervalSeconds": 60,
+      "maxConsecutiveFailures": 3,
+      "path": "/",
+      "portIndex": 0,
+      "protocol": "MESOS_HTTP",
+      "ipProtocol": "IPv4",
+      "timeoutSeconds": 20,
+      "delaySeconds": 15
+    }
+  ]
+}
