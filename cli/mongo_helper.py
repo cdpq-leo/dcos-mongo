@@ -1,8 +1,10 @@
 from collections import OrderedDict
+import json
 import logging
 import os
 import time
 
+import jwt
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 import requests
@@ -15,10 +17,14 @@ class MongoHelper:
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(logging.StreamHandler())
 
-        self.mesos_url = os.getenv("MESOS_URL", "http://leader.mesos:8080")
+        # Environment variables provided by marathon.
         self.marathon_app_id = os.getenv("MARATHON_APP_ID")
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT0", "27017"))
+
+        # Environment variables specific to this app.
+        self.marathon_api_url = os.getenv("MARATHON_API_URL", "http://leader.mesos:8080")
+        self.service_account_credentials = os.getenv("DCOS_SERVICE_ACCOUNT_CREDENTIAL")
         self.replica_set = os.getenv("MONGO_REPLICA_SET", "rs")
         self.user_admin_username = os.getenv("MONGO_USER_ADMIN_USERNAME", "user_admin")
         self.user_admin_password = os.getenv("MONGO_USER_ADMIN_PASSWORD", "user_admin")
@@ -175,9 +181,15 @@ class MongoHelper:
         return "{}:{}".format(self.host, self.port)
 
     def _get_all_replica_endpoints(self):
-        resp = requests.get("{}/v2/apps/{}".format(self.mesos_url, self.marathon_app_id.strip("/")))
+        auth_token = self._generate_auth_token()
+
+        self.logger.info("auth token: {}".format(auth_token))
+        self.logger.info("api url: {}/v2/apps/{}".format(self.marathon_api_url, self.marathon_app_id.strip("/")))
+
+        resp = requests.get("{}/v2/apps/{}".format(self.marathon_api_url, self.marathon_app_id.strip("/")),
+                            headers={"Authorization": "token={}".format(auth_token)})
         if resp.status_code != 200:
-            raise Exception("An error occured while calling marathon api.")
+            raise Exception("An error occured while calling marathon api:\n{}: {}".format(resp.status_code, resp.text))
 
         mongo_replicas = []
 
@@ -188,6 +200,31 @@ class MongoHelper:
                     mongo_replicas.append("{}:{}".format(task["host"], port))
 
         return mongo_replicas
+
+    def _generate_auth_token(self):
+        try:
+            if not self.service_account_credentials:
+                return None
+
+            credentials = json.loads(self.service_account_credentials)
+
+            if "uid" not in credentials or "private_key" not in credentials or "login_endpoint" not in credentials:
+                self.logger.error("Invalid service account credentials.")
+                return None
+
+            jwt_token = jwt.encode({"uid": credentials["uid"]}, credentials["private_key"], algorithm="RS256")
+
+            resp = requests.post(credentials["login_endpoint"],
+                                 json={"uid": credentials["uid"], "token": jwt_token.decode()},
+                                 headers={"Content-Type": "application/json"},
+                                 verify=False)
+            if resp.status_code != 200:
+                self.logger.error("Failed to generate auth token:\n{}: {}".format(resp.status_code, resp.text))
+                return None
+
+            return resp.json()["token"]
+        except Exception as e:
+            self.logger.exception(e)
 
     def _get_current_replica_set_config(self):
         command = OrderedDict({"replSetGetConfig": 1})

@@ -1,5 +1,5 @@
 {
-  "id": "/mongo",
+  "id": "mongo",
   "cmd": null,
   "cpus": 1,
   "mem": 1024,
@@ -20,8 +20,8 @@
     "MONGO_USER_ADMIN_PASSWORD": "user_admin",
     "MONGO_CLUSTER_ADMIN_USERNAME": "cluster_admin",
     "MONGO_CLUSTER_ADMIN_PASSWORD": "cluster_admin",
-    "MESOS_URL": "http://leader.mesos:8080",
-    "LOG_LEVEL": "DEBUG"
+    "MARATHON_API_URL": "http://leader.mesos:8080",
+    "DCOS_SERVICE_ACCOUNT_CREDENTIAL": "{}"
   },
   "container": {
     "type": "DOCKER",
