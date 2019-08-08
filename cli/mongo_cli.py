@@ -26,6 +26,18 @@ def create_cluster_administrator():
 
 
 @cli.command()
+def create_backup_user():
+    if not MongoHelper().create_backup_user():
+        raise Exception("Failed to create backup user.")
+
+
+@cli.command()
+def create_cluster_monitor_user():
+    if not MongoHelper().create_cluster_monitor_user():
+        raise Exception("Failed to create cluster monitor user.")
+
+
+@cli.command()
 def add_replica_to_replica_set():
     if not MongoHelper().add_replica_to_replica_set():
         raise Exception("Failed to add replica to replica set.")
@@ -34,6 +46,8 @@ def add_replica_to_replica_set():
 cli.add_command(initiate_replica_set)
 cli.add_command(create_user_administrator)
 cli.add_command(create_cluster_administrator)
+cli.add_command(create_backup_user)
+cli.add_command(create_cluster_monitor_user)
 cli.add_command(add_replica_to_replica_set)
 
 if __name__ == '__main__':

@@ -3,6 +3,18 @@
 # See link below for details:
 # https://docs.mongodb.com/manual/tutorial/deploy-replica-set-with-keyfile-access-control/
 
+run_cli_command() {
+  command_name=$1
+  error_msg=$2
+
+  if ! python3 ./cli/mongo_cli.py "$command_name"
+  then
+    echo "$error_msg"
+    mongod --dbpath "${MONGO_DB_PATH}" --shutdown
+    exit 1
+  fi
+}
+
 if [[ -z "$MARATHON_APP_ID" ]];
 then
   echo "Not a marathon app."
@@ -32,36 +44,22 @@ mongod \
   &
 
 echo "Initiating replica set..."
-if ! python3 ./cli/mongo_cli.py initiate-replica-set
-then
-  echo "Failed to initate replica set."
-  mongod --dbpath "${MONGO_DB_PATH}" --shutdown
-  exit 1
-fi
+run_cli_command "initiate-replica-set" "Failed to initate replica set."
 
 echo "Creating user administrator..."
-if ! python3 ./cli/mongo_cli.py create-user-administrator
-then
-  echo "Failed to create user administrator."
-  mongod --dbpath "${MONGO_DB_PATH}" --shutdown
-  exit 1
-fi
+run_cli_command "create-user-administrator" "Failed to create user administrator."
 
 echo "Creating cluster administrator..."
-if ! python3 ./cli/mongo_cli.py create-cluster-administrator
-then
-  echo "Failed to create cluster administrator."
-  mongod --dbpath "${MONGO_DB_PATH}" --shutdown
-  exit 1
-fi
+run_cli_command "create-cluster-administrator" "Failed to create cluster administrator."
+
+echo "Creating backup user..."
+run_cli_command "create-backup-user" "Failed to create backup user."
+
+echo "Creating cluster monitor user..."
+run_cli_command "create-cluster-monitor-user" "Failed to create cluster monitor user."
 
 echo "Adding replica to replica set..."
-if ! python3 ./cli/mongo_cli.py add-replica-to-replica-set
-then
-  echo "Failed to add replica to replica set."
-  mongod --dbpath "${MONGO_DB_PATH}" --shutdown
-  exit 1
-fi
+run_cli_command "add-replica-to-replica-set" "Failed to add replica to replica set."
 
 echo "Done"
 tail -F "${MONGO_LOG_PATH}"

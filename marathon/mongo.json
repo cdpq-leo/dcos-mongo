@@ -20,6 +20,10 @@
     "MONGO_USER_ADMIN_PASSWORD": "user_admin",
     "MONGO_CLUSTER_ADMIN_USERNAME": "cluster_admin",
     "MONGO_CLUSTER_ADMIN_PASSWORD": "cluster_admin",
+    "MONGO_BACKUP_USERNAME": "backup",
+    "MONGO_BACKUP_PASSWORD": "backup",
+    "MONGO_CLUSTER_MONITOR_USERNAME": "monitor",
+    "MONGO_CLUSTER_MONITOR_PASSWORD": "monitor",
     "MARATHON_API_URL": "http://leader.mesos:8080",
     "DCOS_SERVICE_ACCOUNT_CREDENTIAL": "{}"
   },

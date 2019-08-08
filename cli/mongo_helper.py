@@ -6,8 +6,10 @@ import time
 
 import jwt
 from pymongo import MongoClient
-from pymongo.errors import PyMongoError
+from pymongo.errors import PyMongoError, OperationFailure
 import requests
+
+from mongo_error_codes import MongoErrorCodes
 
 
 class MongoHelper:
@@ -30,21 +32,25 @@ class MongoHelper:
         self.user_admin_password = os.getenv("MONGO_USER_ADMIN_PASSWORD", "user_admin")
         self.cluster_admin_username = os.getenv("MONGO_CLUSTER_ADMIN_USERNAME", "cluster_admin")
         self.cluster_admin_password = os.getenv("MONGO_CLUSTER_ADMIN_PASSWORD", "cluster_admin")
+        self.backup_username = os.getenv("MONGO_BACKUP_USERNAME", "backup_user")
+        self.backup_password = os.getenv("MONGO_BACKUP_PASSWORD", "backup_user")
+        self.cluster_monitor_username = os.getenv("MONGO_CLUSTER_MONITOR_USERNAME", "cluster_monitor_user")
+        self.cluster_monitor_password = os.getenv("MONGO_CLUSTER_MONITOR_PASSWORD", "cluster_monitor_user")
 
     # Initiate replica set.
     ####################################################################################################################
     def initiate_replica_set(self):
-        return self._try_func(self._initiate_replica_set, max_attempts=18)
+        return self._try_func(self._initiate_replica_set, max_attempts=20)
 
     def _initiate_replica_set(self):
-        # Make sure we initiate replica set only once.
-        if not self._is_first_replica():
-            # Other replicas wait for the replica set to be initiated, in case of failure of the first replica
-            # before de the replica set is initiated.
-            self.logger.info("Waiting for replica set to be initiated...")
-            return self._replica_set_initiated()
+        if self._replica_set_initiated():
+            return True
 
-        # Initiate replica set on first replica.
+        # The first replica initiate the replica set and the others wait.
+        if not self._is_first_replica():
+            self.logger.info("Waiting for replica set to be initiated...")
+            return False
+
         self.logger.info("Initiating replica set...")
 
         repl_set_initiate = OrderedDict({
@@ -58,7 +64,7 @@ class MongoHelper:
 
         result = self._run_mongo_command(repl_set_initiate, local=True)
 
-        return self._mongo_command_succeeded(result)
+        return result and (result.get("ok") or result.get("code") == MongoErrorCodes.ALREADY_INITIALIZED)
 
     def _replica_set_initiated(self, local=False):
         repl_set_get_status = OrderedDict({"replSetGetStatus": 1})
@@ -68,10 +74,7 @@ class MongoHelper:
                                          username=self.cluster_admin_username,
                                          password=self.cluster_admin_password)
 
-        return self._mongo_command_succeeded(result)
-
-    def _is_first_replica(self):
-        return self._get_all_replica_endpoints()[0] == self._get_current_replica_endpoint()
+        return result and result.get("ok")
 
     # Create user administrator.
     ####################################################################################################################
@@ -79,19 +82,13 @@ class MongoHelper:
         return self._try_func(self._create_user_administrator)
 
     def _create_user_administrator(self):
-        if not self._is_first_replica():
-            return True
-
-        self.logger.info("Creating user administrator...")
-
-        create_user = OrderedDict()
-        create_user["createUser"] = self.user_admin_username
-        create_user["pwd"] = self.user_admin_password
-        create_user["roles"] = [{"role": "userAdminAnyDatabase", "db": "admin"}]
-
-        result = self._run_mongo_command(create_user, local=True)
-
-        return self._mongo_command_succeeded(result)
+        if self._is_first_replica():
+            self.logger.info("Creating user administrator...")
+            return self._create_user(self.user_admin_username, self.user_admin_password, "userAdminAnyDatabase")
+        else:
+            self.logger.info("Waiting for user administrator to be created...")
+            user_info_result = self._get_user_info(self.user_admin_username)
+            return user_info_result and user_info_result.get("ok") and user_info_result.get("users")
 
     # Create cluster administrator.
     ####################################################################################################################
@@ -99,20 +96,59 @@ class MongoHelper:
         return self._try_func(self._create_cluster_administrator)
 
     def _create_cluster_administrator(self):
-        if not self._is_first_replica():
+        user_info_result = self._get_user_info(self.cluster_admin_username)
+
+        if not user_info_result or not user_info_result.get("ok"):
+            return False
+        if user_info_result.get("users"):
             return True
 
-        create_user = OrderedDict()
-        create_user["createUser"] = self.cluster_admin_username
-        create_user["pwd"] = self.cluster_admin_password
-        create_user["roles"] = [{"role": "clusterAdmin", "db": "admin"}]
+        if not self._is_master():
+            self.logger.info("Waiting for cluster administrator to be created...")
+            return False
 
-        result = self._run_mongo_command(create_user,
-                                         local=True,
-                                         username=self.user_admin_username,
-                                         password=self.user_admin_password)
+        self.logger.info("Creating cluster administrator...")
+        return self._create_user(self.cluster_admin_username, self.cluster_admin_password, "clusterAdmin")
 
-        return self._mongo_command_succeeded(result)
+    # Create backup user.
+    ####################################################################################################################
+    def create_backup_user(self):
+        return self._try_func(self._create_backup_user)
+
+    def _create_backup_user(self):
+        user_info_result = self._get_user_info(self.backup_username)
+
+        if not user_info_result or not user_info_result.get("ok"):
+            return False
+        if user_info_result.get("users"):
+            return True
+
+        if not self._is_master():
+            self.logger.info("Waiting for backup user to be created...")
+            return False
+
+        self.logger.info("Creating backup user...")
+        return self._create_user(self.backup_username, self.backup_password, "backup")
+
+    # Create cluster monitor user.
+    ####################################################################################################################
+    def create_cluster_monitor_user(self):
+        return self._try_func(self._create_cluster_monitor_user)
+
+    def _create_cluster_monitor_user(self):
+        user_info_result = self._get_user_info(self.cluster_monitor_username)
+
+        if not user_info_result or not user_info_result.get("ok"):
+            return False
+        if user_info_result.get("users"):
+            return True
+
+        if not self._is_master():
+            self.logger.info("Waiting for cluster monitor user to be created...")
+            return False
+
+        self.logger.info("Creating cluster monitor user...")
+        return self._create_user(self.cluster_monitor_username, self.cluster_monitor_password, "clusterMonitor")
 
     # Add replica to replica set.
     ####################################################################################################################
@@ -130,14 +166,10 @@ class MongoHelper:
                                          username=self.cluster_admin_username,
                                          password=self.cluster_admin_password)
 
-        return self._mongo_command_succeeded(result)
+        return result and result.get("ok")
 
     # Helper functions.
     ####################################################################################################################
-
-    @staticmethod
-    def _mongo_command_succeeded(result):
-        return result and result.get("ok", 0) == 1
 
     @staticmethod
     def _try_func(func, max_attempts=6, sleep=10):
@@ -166,9 +198,12 @@ class MongoHelper:
                                 password=password,
                                 document_class=OrderedDict)
 
-            self.logger.info("Command: {}".format(command))
+            #self.logger.info(command)
             result = mongo.admin.command(command)
-            self.logger.info("Result: {}".format(result))
+            self.logger.info(result)
+        except OperationFailure as e:
+            self.logger.error("{}: {}".format(e.code, e.details))
+            result = e.details
         except PyMongoError as e:
             self.logger.exception(e)
         finally:
@@ -177,14 +212,45 @@ class MongoHelper:
 
         return result
 
+    def _get_user_info(self, username):
+        users_info = OrderedDict({"usersInfo": username})
+
+        return self._run_mongo_command(users_info,
+                                       local=True,
+                                       username=self.user_admin_username,
+                                       password=self.user_admin_password)
+
+    def _create_user(self, username, password, role):
+        create_user = OrderedDict()
+        create_user["createUser"] = username
+        create_user["pwd"] = password
+        create_user["roles"] = [{"role": role, "db": "admin"}]
+
+        cmd_usr = None if username == self.user_admin_username else self.user_admin_username
+        cmd_pwd = None if username == self.user_admin_username else self.user_admin_password
+
+        result = self._run_mongo_command(create_user, local=True, username=cmd_usr, password=cmd_pwd)
+
+        return result and (result.get("ok") or result.get("code" == MongoErrorCodes.DUPLICATE_KEY))
+
+    def _is_master(self):
+        is_master = OrderedDict({"isMaster": 1})
+
+        result = self._run_mongo_command(is_master,
+                                         local=True,
+                                         username=self.user_admin_username,
+                                         password=self.user_admin_password)
+
+        return result and result.get("ok") and result.get("ismaster")
+
+    def _is_first_replica(self):
+        return self._get_all_replica_endpoints()[0] == self._get_current_replica_endpoint()
+
     def _get_current_replica_endpoint(self):
         return "{}:{}".format(self.host, self.port)
 
     def _get_all_replica_endpoints(self):
         auth_token = self._generate_auth_token()
-
-        self.logger.info("auth token: {}".format(auth_token))
-        self.logger.info("api url: {}/v2/apps/{}".format(self.marathon_api_url, self.marathon_app_id.strip("/")))
 
         resp = requests.get("{}/v2/apps/{}".format(self.marathon_api_url, self.marathon_app_id.strip("/")),
                             headers={"Authorization": "token={}".format(auth_token)})
