@@ -44,6 +44,7 @@ class MongoHelper:
 
     def _initiate_replica_set(self):
         if self._replica_set_initiated():
+            self.logger.info("Replica set initiated.")
             return True
 
         # The first replica initiate the replica set and the others wait.
@@ -82,13 +83,18 @@ class MongoHelper:
         return self._try_func(self._create_user_administrator)
 
     def _create_user_administrator(self):
-        if self._is_first_replica():
-            self.logger.info("Creating user administrator...")
-            return self._create_user(self.user_admin_username, self.user_admin_password, "userAdminAnyDatabase")
-        else:
+        user_info_result = self._get_user_info(self.user_admin_username)
+
+        if user_info_result and user_info_result.get("ok") and user_info_result.get("users"):
+            self.logger.info("User administrator created.")
+            return True
+
+        if not self._is_first_replica():
             self.logger.info("Waiting for user administrator to be created...")
-            user_info_result = self._get_user_info(self.user_admin_username)
-            return user_info_result and user_info_result.get("ok") and user_info_result.get("users")
+            return False
+
+        self.logger.info("Creating user administrator...")
+        return self._create_user(self.user_admin_username, self.user_admin_password, "userAdminAnyDatabase")
 
     # Create cluster administrator.
     ####################################################################################################################
@@ -101,6 +107,7 @@ class MongoHelper:
         if not user_info_result or not user_info_result.get("ok"):
             return False
         if user_info_result.get("users"):
+            self.logger.info("Cluster administrator created.")
             return True
 
         if not self._is_master():
@@ -121,6 +128,7 @@ class MongoHelper:
         if not user_info_result or not user_info_result.get("ok"):
             return False
         if user_info_result.get("users"):
+            self.logger.info("Backup user created.")
             return True
 
         if not self._is_master():
@@ -141,6 +149,7 @@ class MongoHelper:
         if not user_info_result or not user_info_result.get("ok"):
             return False
         if user_info_result.get("users"):
+            self.logger.info("Cluster monitor created.")
             return True
 
         if not self._is_master():
