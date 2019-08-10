@@ -166,8 +166,22 @@ class MongoHelper:
         return self._try_func(self._add_replica_to_replica_set)
 
     def _add_replica_to_replica_set(self):
+        current_config = self._get_current_replica_set_config()
+
+        if not current_config or not current_config.get("ok"):
+            return False
+
+        # Check if current replica is a member of the replica set.
+        for member in current_config.get("members", []):
+            if member.get("host") == self._get_current_replica_endpoint():
+                self.logger.info("Replica is already a member of the replica set...")
+                return True
+
+        # If not a member, update replica set config.
+        new_version = current_config["config"]["version"] + 1 if current_config else 1
+
         repl_set_reconfig = OrderedDict()
-        repl_set_reconfig["replSetReconfig"] = self._get_new_replica_set_config()
+        repl_set_reconfig["replSetReconfig"] = self._get_new_replica_set_config(new_version)
         repl_set_reconfig["force"] = False
 
         result = self._run_mongo_command(repl_set_reconfig,
@@ -309,12 +323,9 @@ class MongoHelper:
                                          password=self.cluster_admin_password)
         return result
 
-    def _get_new_replica_set_config(self):
-        current_config = self._get_current_replica_set_config()
-        new_config_version = current_config["config"]["version"]+1 if current_config else 1
-
+    def _get_new_replica_set_config(self, new_version):
         # Build config based on marathon app endpoints.
-        new_config = {"_id": "rs", "version": new_config_version, "protocolVersion": 1, "members": []}
+        new_config = {"_id": "rs", "version": new_version, "protocolVersion": 1, "members": []}
         for i, host in enumerate(self._get_all_replica_endpoints()):
             new_config["members"].append({"_id": i, "host": host})
 
