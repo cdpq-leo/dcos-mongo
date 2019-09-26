@@ -67,11 +67,11 @@ class MongoHelper:
 
         return result and (result.get("ok") or result.get("code") == MongoErrorCodes.ALREADY_INITIALIZED)
 
-    def _replica_set_initiated(self, local=False):
+    def _replica_set_initiated(self):
         repl_set_get_status = OrderedDict({"replSetGetStatus": 1})
 
         result = self._run_mongo_command(repl_set_get_status,
-                                         local=local,
+                                         local=False,
                                          username=self.cluster_admin_username,
                                          password=self.cluster_admin_password)
 
@@ -83,13 +83,14 @@ class MongoHelper:
         return self._try_func(self._create_user_administrator)
 
     def _create_user_administrator(self):
-        user_info_result = self._get_user_info(self.user_admin_username)
+        is_first_replica = self._is_first_replica()
+        user_info_result = self._get_user_info(self.user_admin_username, is_first_replica)
 
         if user_info_result and user_info_result.get("ok") and user_info_result.get("users"):
             self.logger.info("User administrator created.")
             return True
 
-        if not self._is_first_replica():
+        if not is_first_replica:
             self.logger.info("Waiting for user administrator to be created...")
             return False
 
@@ -102,15 +103,14 @@ class MongoHelper:
         return self._try_func(self._create_cluster_administrator)
 
     def _create_cluster_administrator(self):
-        user_info_result = self._get_user_info(self.cluster_admin_username)
+        is_master = self._is_master()
+        user_info_result = self._get_user_info(self.cluster_admin_username, is_master)
 
-        if not user_info_result or not user_info_result.get("ok"):
-            return False
-        if user_info_result.get("users"):
+        if user_info_result and user_info_result.get("ok") and user_info_result.get("users"):
             self.logger.info("Cluster administrator created.")
             return True
 
-        if not self._is_master():
+        if not is_master:
             self.logger.info("Waiting for cluster administrator to be created...")
             return False
 
@@ -123,15 +123,14 @@ class MongoHelper:
         return self._try_func(self._create_backup_user)
 
     def _create_backup_user(self):
-        user_info_result = self._get_user_info(self.backup_username)
+        is_master = self._is_master()
+        user_info_result = self._get_user_info(self.backup_username, is_master)
 
-        if not user_info_result or not user_info_result.get("ok"):
-            return False
-        if user_info_result.get("users"):
+        if user_info_result and user_info_result.get("ok") and user_info_result.get("users"):
             self.logger.info("Backup user created.")
             return True
 
-        if not self._is_master():
+        if not is_master:
             self.logger.info("Waiting for backup user to be created...")
             return False
 
@@ -144,15 +143,14 @@ class MongoHelper:
         return self._try_func(self._create_cluster_monitor_user)
 
     def _create_cluster_monitor_user(self):
-        user_info_result = self._get_user_info(self.cluster_monitor_username)
+        is_master = self._is_master()
+        user_info_result = self._get_user_info(self.cluster_monitor_username, is_master)
 
-        if not user_info_result or not user_info_result.get("ok"):
-            return False
-        if user_info_result.get("users"):
+        if user_info_result and user_info_result.get("ok") and user_info_result.get("users"):
             self.logger.info("Cluster monitor created.")
             return True
 
-        if not self._is_master():
+        if not is_master:
             self.logger.info("Waiting for cluster monitor user to be created...")
             return False
 
@@ -166,22 +164,20 @@ class MongoHelper:
         return self._try_func(self._add_replica_to_replica_set)
 
     def _add_replica_to_replica_set(self):
-        current_config = self._get_current_replica_set_config()
+        rs_config = self._get_current_replica_set_config()
 
-        if not current_config or not current_config.get("ok"):
+        if not rs_config or not rs_config.get("ok"):
             return False
 
         # Check if current replica is a member of the replica set.
-        for member in current_config.get("members", []):
-            if member.get("host") == self._get_current_replica_endpoint():
+        for member in rs_config["config"]["members"]:
+            if member["host"] == self._get_current_replica_endpoint():
                 self.logger.info("Replica is already a member of the replica set...")
                 return True
 
         # If not a member, update replica set config.
-        new_version = current_config["config"]["version"] + 1 if current_config else 1
-
         repl_set_reconfig = OrderedDict()
-        repl_set_reconfig["replSetReconfig"] = self._get_new_replica_set_config(new_version)
+        repl_set_reconfig["replSetReconfig"] = self._get_new_replica_set_config(rs_config)
         repl_set_reconfig["force"] = False
 
         result = self._run_mongo_command(repl_set_reconfig,
@@ -221,7 +217,6 @@ class MongoHelper:
                                 password=password,
                                 document_class=OrderedDict)
 
-            #self.logger.info(command)
             result = mongo.admin.command(command)
             self.logger.info(result)
         except OperationFailure as e:
@@ -235,11 +230,11 @@ class MongoHelper:
 
         return result
 
-    def _get_user_info(self, username):
+    def _get_user_info(self, username, local):
         users_info = OrderedDict({"usersInfo": username})
 
         return self._run_mongo_command(users_info,
-                                       local=True,
+                                       local=local,
                                        username=self.user_admin_username,
                                        password=self.user_admin_password)
 
@@ -323,10 +318,26 @@ class MongoHelper:
                                          password=self.cluster_admin_password)
         return result
 
-    def _get_new_replica_set_config(self, new_version):
-        # Build config based on marathon app endpoints.
-        new_config = {"_id": "rs", "version": new_version, "protocolVersion": 1, "members": []}
-        for i, host in enumerate(self._get_all_replica_endpoints()):
-            new_config["members"].append({"_id": i, "host": host})
+    def _get_new_replica_set_config(self, rs_config):
+        # Generate new config.
+        new_config = {
+            "_id": "rs",
+            "version": rs_config["config"]["version"] + 1 if rs_config else 1,
+            "protocolVersion": 1,
+            "members": []
+        }
+
+        # Keep active replicas from previous config.
+        if rs_config:
+            endpoints = self._get_all_replica_endpoints()
+            for member in rs_config["config"]["members"]:
+                if member["host"] in endpoints:
+                    new_config["members"].append(member)
+
+        # Add current replica to members list.
+        new_config["members"].append({
+            "_id": max([i["_id"] for i in rs_config["config"]["members"]]) + 1 if rs_config else 0,
+            "host": self._get_current_replica_endpoint()
+        })
 
         return new_config
